@@ -4,16 +4,20 @@
 #include "SD.h"
 #include "SPI.h"
 
-#define GPIOInit(_PIN_,_MODE_)    pinMode(_PIN_,_MODE_)
-#define GPIOWrite(_PIN_,_STATE_)  digitalWrite(_PIN_,_STATE_)
-#define GPIORead(_PIN_)           digitalRead(_PIN_)
+#define GPIOInit(_PIN_,_MODE_)              pinMode(_PIN_,_MODE_)
+#define GPIOWrite(_PIN_,_STATE_)            digitalWrite(_PIN_,_STATE_)
+#define GPIORead(_PIN_)                     digitalRead(_PIN_)
+#define GPIOAttachINT(_PIN_,_FUNC_,_MODE_)  attachInterrupt(_PIN_,_FUNC_,_MODE_)
 
 #define _GPS_EN_PIN_              4 //GPIO4
 #define _SD_CS_PIN_               5 //GPIO5
+#define _GPS_PPS_PIN              2 //GPIO2
 
 int32_t RxData_I32;
 SPIClass SPI_SD(VSPI);
 char* Path="/datalog_ESP32.txt";
+int64_t Size_I64=0;
+int64_t SentenceSize_I64=0;
 
 void writeFile(fs::FS &fs, const char * path, const char * message){
     // Serial.printf("Writing file: %s\n", path);
@@ -65,6 +69,32 @@ void readFile(fs::FS &fs, const char * path, uint8_t *buffer_AU8, uint64_t *size
   file.close();
 }
 
+void GPS_Receive_Handle(uint8_t ch)
+{
+  if (ch=='\r' || ch=='\n')
+  {
+
+  }
+}
+
+void PPS_INT_Handle()
+{
+  do
+  {
+    RxData_I32=Serial2.read();
+    if (RxData_I32!=-1)
+    {
+
+    }
+    else
+    {
+      break;
+    }
+    
+  } while (-1);
+  
+}
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
@@ -85,17 +115,13 @@ void setup() {
   Serial.println(temp[0]);*/
   GPIOInit(_GPS_EN_PIN_,OUTPUT);
   GPIOWrite(_GPS_EN_PIN_,1);
+
+  GPIOInit(_GPS_PPS_PIN,INPUT_PULLDOWN);
+  GPIOAttachINT(_GPS_PPS_PIN,PPS_INT_Handle,FALLING);
+
   Serial.println("Start...");
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
-  if (Serial2.available()>0)
-  {
-    RxData_I32=Serial2.read();
-    if (RxData_I32 !=-1)
-    {
-      Serial.print((char)RxData_I32);
-    }
-  }
 }
