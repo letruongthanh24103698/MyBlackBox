@@ -4,22 +4,12 @@
 #include "SD.h"
 #include "SPI.h"
 
-#include <WiFi.h>
-#include <HTTPClient.h>
+#include "header.h"
+#include "wireless.h"
 
-#define GPIOInit(_PIN_,_MODE_)              pinMode(_PIN_,_MODE_)
-#define GPIOWrite(_PIN_,_STATE_)            digitalWrite(_PIN_,_STATE_)
-#define GPIORead(_PIN_)                     digitalRead(_PIN_)
-#define GPIOAttachINT(_PIN_,_FUNC_,_MODE_)  attachInterrupt(_PIN_,_FUNC_,_MODE_)
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 
-#define _GPS_EN_PIN_              4 //GPIO4
-#define _SD_CS_PIN_               5 //GPIO5
-#define _GPS_PPS_PIN              13 //GPIO13
-#define _ONBOARD_LED_PIN_         2
-#define _BUTTON_LEFT_PIN_         35
-#define _BUTTON_RIGHT_PIN_        34
-#define _LED_LEFT_PIN_            33
-#define _LED_RIGHT_PIN_           32
 
 #define _GPRMC_SPEED_ORDER_       7
 #define _GPRMC_TIME_ORDER_        1
@@ -35,6 +25,9 @@ uint8_t SentenceSize_U8=0;
 uint8_t Buffer_AU8[200];
 uint8_t SentenceBuffer_AU8[200];
 bool GetTimeDone_B=false;
+bool OpenWirelessMode_B=false;
+bool CloseWirelessMode_B=false;
+bool IsWirelessRunning_B=false;
 
 void writeFile(fs::FS &fs, const char * path, const char * message){
     // Serial.printf("Writing file: %s\n", path);
@@ -49,7 +42,7 @@ void writeFile(fs::FS &fs, const char * path, const char * message){
         // Serial.println("File written");
         GPIOWrite(_ONBOARD_LED_PIN_,1);
     } else {
-        // Serial.println("Write failed");
+        Serial.println("Write failed");
         GPIOWrite(_ONBOARD_LED_PIN_,0);
     }
     file.close();
@@ -68,7 +61,7 @@ void appendFile(fs::FS &fs, const char * path, const char * message){
         // Serial.println("Message appended");
         GPIOWrite(_ONBOARD_LED_PIN_,1);
     } else {
-        // Serial.println("Append failed");
+        Serial.println("Append failed");
         GPIOWrite(_ONBOARD_LED_PIN_,0);
     }
     file.close();
@@ -241,21 +234,32 @@ void PPS_INT_Handle()
       break;
     }
     
-  } while (1);
+  } while (!OpenWirelessMode_B && !IsWirelessRunning_B);
   
 }
 
 void Button_Left_Handle()
 {
-  //TODO
+  OpenWirelessMode_B=true;
 }
 
 void Button_Right_Handle()
 {
-  //TODO
+  CloseWirelessMode_B=true;
+}
+
+void CreateBlankFile()
+{
+  if (SD.exists(Path))
+  {
+    SD.remove(Path);
+    File myfile = SD.open(Path, FILE_WRITE);
+    myfile.close();
+  }
 }
 
 void setup() {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
   // put your setup code here, to run once:
   Serial.begin(115200);
   Serial2.begin(9600);
@@ -265,7 +269,9 @@ void setup() {
       Serial.println("Card Mount Failed");
       return;
   }
-  writeFile(SD, Path, "");
+
+  CreateBlankFile();
+
   /*uint8_t temp[4];
   uint64_t size;
   readFile(SD, Path ,temp, &size);*/
@@ -296,5 +302,35 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
-  PPS_INT_Handle();
+  if (OpenWirelessMode_B)
+  {
+    GPIOWrite(_ONBOARD_LED_PIN_,0);
+    OpenWirelessMode_B=false;
+    IsWirelessRunning_B=true;
+    GPIOWrite(_LED_LEFT_PIN_,0);
+    GPIOWrite(_LED_RIGHT_PIN_,0);
+    wireless_start();
+  }
+
+  if (CloseWirelessMode_B)
+  {
+    GPIOWrite(_ONBOARD_LED_PIN_,1);
+    CloseWirelessMode_B=false;
+    IsWirelessRunning_B=false;
+    GPIOWrite(_LED_LEFT_PIN_,0);
+    GPIOWrite(_LED_RIGHT_PIN_,0);
+    wireless_stop();
+  }
+
+  if (IsWirelessRunning_B)
+  {
+    wireless_loop();
+  }
+  else
+  {
+    PPS_INT_Handle();
+  }
+  
+
+
 }
