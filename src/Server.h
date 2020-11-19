@@ -2,5 +2,7 @@
 #define _SRC_SERVER_H_
 
 #include <Arduino.h>
-
+void server_setup();
+void server_start();
+void server_stop();
 #endif

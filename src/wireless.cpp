@@ -18,6 +18,7 @@
 #include <Preferences.h>
 
 #include "wireless.h"
+#include "Server.h"
 
 /** Build time */
 const char compileDate[] = __DATE__ " " __TIME__;
@@ -238,6 +239,7 @@ void deinitBLE()
 /** Callback for receiving IP address from AP */
 void gotIP(system_event_id_t event) {
     GPIOWrite(_WIFI_CONNECTION_STATUS_PIN_,1);
+	server_start();
 	isConnected = true;
 	connStatusChanged = true;
 }
@@ -245,6 +247,7 @@ void gotIP(system_event_id_t event) {
 /** Callback for connection loss */
 void lostCon(system_event_id_t event) {
     GPIOWrite(_WIFI_CONNECTION_STATUS_PIN_,0);
+	server_stop();
 	isConnected = false;
 	connStatusChanged = true;
 }
@@ -423,6 +426,7 @@ void wireless_stop()
     WiFi.mode(WIFI_STA);
     btStop();
     isConnected=false;
+	Serial.println("Wireless Stopped!");
 }
 
 void wireless_start()

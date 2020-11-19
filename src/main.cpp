@@ -6,16 +6,19 @@
 
 #include "header.h"
 #include "wireless.h"
+#include "Server.h"
 
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
-
 
 #define _GPRMC_SPEED_ORDER_       7
 #define _GPRMC_TIME_ORDER_        1
 #define _GPRMC_DATE_ORDER_        9
 
 #define _KNOT_2_KMH_              1.852
+
+#define _SPEED_THRESH_HOLD_       40.0
+#define _SPEED_THRESH_HOLD_DELTA_ 1.0
 
 int32_t RxData_I32;
 SPIClass SPI_SD(VSPI);
@@ -28,6 +31,9 @@ bool GetTimeDone_B=false;
 bool OpenWirelessMode_B=false;
 bool CloseWirelessMode_B=false;
 bool IsWirelessRunning_B=false;
+bool DecodeTime_B=false;
+
+TaskHandle_t Task1;
 
 void writeFile(fs::FS &fs, const char * path, const char * message){
     // Serial.printf("Writing file: %s\n", path);
@@ -101,20 +107,39 @@ void New_Speed_Handle(float speed)
 {
   Serial.print("Speed :");
   Serial.println(speed);
-  //TODO HANDLE SPEED CHANGE
+
+  if (speed>=(_SPEED_THRESH_HOLD_ - _SPEED_THRESH_HOLD_DELTA_) && speed<=(_SPEED_THRESH_HOLD_ + _SPEED_THRESH_HOLD_DELTA_))
+  {
+    GPIOWrite(_LED_LEFT_PIN_, 1);
+    GPIOWrite(_LED_RIGHT_PIN_, 0);
+  }
+  else if (speed > (_SPEED_THRESH_HOLD_ + _SPEED_THRESH_HOLD_DELTA_))
+  {
+    GPIOWrite(_LED_LEFT_PIN_, 1);
+    GPIOWrite(_LED_RIGHT_PIN_, 1);
+  }
+  else
+  {
+    GPIOWrite(_LED_LEFT_PIN_, 0);
+    GPIOWrite(_LED_RIGHT_PIN_, 0);
+  }
 }
 
 void RenameFile(char *buf)
 {
-  char newname[100];
-  sprintf(newname,"/datalog_ESP32_%s_GMT0.txt",buf);
-  // Serial.println(newname);
+  vTaskDelay(10);
+  char newname[100]="/datalog_ESP32_";
+  // sprintf(newname,"/datalog_ESP32_1234567890123456_GMT0.txt",buf);
+  memcpy(newname+15, buf, 16);
+  memcpy(newname+31, "_GMT0.txt", 9);
+  Serial.println(newname);
   SD.rename(Path, newname);
   memcpy(Path,newname, strlen(buf));
 }
 
 void Decode_Sentence()
 {
+  DecodeTime_B=false;
   uint8_t *buf=SentenceBuffer_AU8;
   uint8_t len=SentenceSize_U8;
   buf[len]=0;
@@ -131,25 +156,28 @@ void Decode_Sentence()
   if (memcmp(buf,"$GPRMC",6)==0)
   {
     //Get Date
-    buf=SentenceBuffer_AU8;
-    len=SentenceSize_U8;
-    for (uint8_t i=0; i<_GPRMC_DATE_ORDER_; i++)
+    if (!GetTimeDone_B)
     {
-      pos=GetCharPos(buf,len,',');
-      if (pos!=-1)
+      buf=SentenceBuffer_AU8;
+      len=SentenceSize_U8;
+      for (uint8_t i=0; i<_GPRMC_DATE_ORDER_; i++)
       {
-        buf=buf+pos+1;
-        len=len-pos-1;
+        pos=GetCharPos(buf,len,',');
+        if (pos!=-1)
+        {
+          buf=buf+pos+1;
+          len=len-pos-1;
+        }
+        else
+          break;
       }
-      else
-        break;
-    }
-    
-    nextpos=GetCharPos(buf,len,',');
-    if (nextpos!=-1)
-    {
-      buf[nextpos]=0;
-      datebuf=buf;
+      
+      nextpos=GetCharPos(buf,len,',');
+      if (nextpos!=-1 && (nextpos-pos)>0)
+      {
+        buf[nextpos]=0;
+        datebuf=buf;
+      }
     }
     
     //Get Speed
@@ -176,28 +204,34 @@ void Decode_Sentence()
     }
 
     //GetTime
-    buf=SentenceBuffer_AU8;
-    len=SentenceSize_U8;
-    for (uint8_t i=0; i<_GPRMC_TIME_ORDER_; i++)
+    if (!GetTimeDone_B)
     {
-      pos=GetCharPos(buf,len,',');
-      if (pos!=-1)
+      buf=SentenceBuffer_AU8;
+      len=SentenceSize_U8;
+      for (uint8_t i=0; i<_GPRMC_TIME_ORDER_; i++)
       {
-        buf=buf+pos+1;
-        len=len-pos-1;
+        pos=GetCharPos(buf,len,',');
+        if (pos!=-1)
+        {
+          buf=buf+pos+1;
+          len=len-pos-1;
+        }
+        else
+          break;
       }
-      else
-        break;
-    }
 
-    nextpos=GetCharPos(buf,len,',');
-    if (nextpos!=-1 && (nextpos-pos)>0)
-    {
-      buf[nextpos]=0;
-      char tmp_c[100];
-      sprintf(tmp_c,"%s_%s",(char *)datebuf,buf);
-      RenameFile((char *)tmp_c);
-      GetTimeDone_B=true;
+      nextpos=GetCharPos(buf,len,',');
+      if (nextpos!=-1 && (nextpos-pos)>0)
+      {
+        buf[nextpos]=0;
+        char tmp_c[100];
+        memcpy(tmp_c,datebuf,6);
+        tmp_c[6]='_';
+        memcpy(tmp_c+7,buf,9);
+        tmp_c[16]=0;
+        RenameFile((char *)tmp_c);
+        GetTimeDone_B=true;
+      }
     }
   }
 }
@@ -206,10 +240,13 @@ void GPS_Receive_Handle(uint8_t ch)
 {
   if (ch=='\n')
   {
-    SentenceSize_U8 = Size_U8;
-    memcpy(SentenceBuffer_AU8, Buffer_AU8, SentenceSize_U8);
-    Decode_Sentence();
-    SentenceSize_U8=0;
+    if (memcmp(Buffer_AU8,"$GPRMC",6)==0)
+    {
+      SentenceSize_U8 = Size_U8;
+      memcpy(SentenceBuffer_AU8, Buffer_AU8, SentenceSize_U8);
+      // Decode_Sentence();
+      DecodeTime_B=true;
+    }
     Size_U8=0;
   }
   else
@@ -221,9 +258,16 @@ void GPS_Receive_Handle(uint8_t ch)
 
 void PPS_INT_Handle()
 {
-  do
+  if (OpenWirelessMode_B || IsWirelessRunning_B)
+  {
+    Serial.flush();
+    return;
+  }
+
+  while (!OpenWirelessMode_B && !IsWirelessRunning_B)
   {
     RxData_I32=Serial2.read();
+
     if (RxData_I32!=-1)
     {
       // Serial.print((char)RxData_I32);
@@ -234,8 +278,7 @@ void PPS_INT_Handle()
       break;
     }
     
-  } while (!OpenWirelessMode_B && !IsWirelessRunning_B);
-  
+  }
 }
 
 void Button_Left_Handle()
@@ -255,6 +298,17 @@ void CreateBlankFile()
     SD.remove(Path);
     File myfile = SD.open(Path, FILE_WRITE);
     myfile.close();
+  }
+}
+
+void Task1code( void * pvParameters )
+{
+  for(;;)
+  {
+    if (DecodeTime_B)
+      Decode_Sentence();
+    vTaskDelay(10);
+    yield();
   }
 }
 
@@ -296,6 +350,18 @@ void setup() {
   GPIOInit(_LED_RIGHT_PIN_, OUTPUT);
   GPIOWrite(_LED_RIGHT_PIN_,0);
 
+  server_setup();
+
+  //create a task that will be executed in the Task1code() function, with priority 1 and executed on core 0
+  xTaskCreatePinnedToCore(
+                    Task1code,   /* Task function. */
+                    "Task1",     /* name of task. */
+                    10000,       /* Stack size of task */
+                    NULL,        /* parameter of the task */
+                    1,           /* priority of the task */
+                    &Task1,      /* Task handle to keep track of created task */
+                    0);          /* pin task to core 0 */      
+
   Serial.println("Start...");
   GPIOWrite(_ONBOARD_LED_PIN_,1);
 }
@@ -326,11 +392,7 @@ void loop() {
   {
     wireless_loop();
   }
-  else
-  {
-    PPS_INT_Handle();
-  }
-  
 
-
+  PPS_INT_Handle();
+  yield();
 }
