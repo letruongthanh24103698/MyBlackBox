@@ -24,7 +24,7 @@ char HTML[] = "<!DOCTYPE html>\
 <h2>Name 1</h2><br>\
 <h2>Name 2</h2><br>\
 <h2>name 3</h2><br>\
-<form action=\"/getNameFile_web\">\
+<form action=\"/getNameFile\">\
     <input type=\"hidden\" name=\"page\" value=\"0\">\
     <input type=\"submit\" value=\"List File\">\
 </form>\
@@ -41,12 +41,12 @@ char HTML_FILE[] = "<!DOCTYPE html>\
 <h1>My Black Box - 11A5 - Quang Tri Town High School &#128522;</h1>\
 <h2>FILE NAME</h2><br>\
 <h3>%s</h3>\
-<form action=\"/getNameFile_web\">\
+<form action=\"/getNameFile\">\
     <input type=\"hidden\" name=\"page\" value=\"%d\">\
     <input type=\"submit\" value=\"Previous\" style=\"float: left\">\
 </form>\
 <label for=\"Page\" style=\"float: left\">   %d/%d   </label>\
-<form action=\"/getNameFile_web\">\
+<form action=\"/getNameFile\">\
     <input type=\"hidden\" name=\"page\" value=\"%d\">\
     <input type=\"submit\" value=\"Next\">\
 </form>\
@@ -80,7 +80,7 @@ uint32_t GetFileCount()
     return cnt;
 }
 
-void GetFileName(char *buf, uint32_t page)
+void GetFileName_Web(char *buf, uint32_t page)
 {
     uint32_t cnt=0;
     File entry;
@@ -143,6 +143,8 @@ void GetFile()
             sv.client().print(resp.c_str());
             // sv.sendHeader("Keep-Alive", "timeout=3600, max=100");
             // Serial.println("start");
+            Serial.print("Ram Left:");
+            Serial.println(esp_get_free_heap_size());
             char buffer[_MAX_BYTE_PER_TIME_+2];
             uint32_t cnt=0;
             uint32_t count=0;
@@ -173,7 +175,7 @@ void GetFile()
             // sv.client().print(buffer);
             // sv.client().flush();
             // Serial.println(buffer);
-            // sv.streamFile(tmp, "text/plain");
+            sv.streamFile(tmp, "text/plain");
             // sv.client().flush();
             tmp.close();
             Serial.println(count);
@@ -201,6 +203,63 @@ void DeleteAllFiles()
     sv.client().flush();
 }
 
+void GetName()
+{
+    File entry;
+    root.close();
+    root=SD.open("/");
+    uint32_t len=0;
+    char *buf=(char *)malloc(20000*sizeof(char));
+    while (true) 
+    {
+        entry =  root.openNextFile();
+
+        if (! entry) 
+            break;
+
+        uint8_t size=strlen(entry.name());
+        memcpy(buf+len,entry.name(),size);
+        len+=size;
+        buf[len++]=',';
+        entry.close();
+    }
+
+    String resp;
+    sv._prepareHeader(resp,200,"text/plain",len);
+    sv.client().print(resp.c_str());
+
+    uint32_t cnt=0;
+    uint32_t available=len;
+    uint32_t written=0;
+    do 
+    {
+        if (available==0)
+            break;
+        cnt=(available > _MAX_BYTE_PER_TIME_)?_MAX_BYTE_PER_TIME_:available;
+        written+=sv.client().write(buf+written,cnt);
+        available-=cnt;
+    }while (1);
+
+    free(buf);
+    sv.client().flush();
+}
+
+void GetSize()
+{
+    if (sv.hasArg("name"))
+    {
+        String inputstring="/"+sv.arg("name");
+        if (SD.exists(inputstring))
+        {
+            File entry=SD.open(inputstring);
+            sv.send(200,"text/plain",String(entry.size()));
+            entry.close();
+            return;
+        }
+    } 
+    sv.send(404,"text/plain","-1");
+}
+
 uint32_t file_count_U32;
 void server_setup()
 {
@@ -213,7 +272,7 @@ void server_setup()
         sv.client().flush();
     });
 
-    sv.on ("/getNameFile_web", [](){
+    sv.on ("/GetNameFile", [](){
         // Serial.println("Get Name File Page Web request!");
         uint32_t page_count_U32=ceil((double)file_count_U32/(double)_MAX_NUMBER_FILE_PER_PAGE_);
         Serial.println(file_count_U32);
@@ -228,7 +287,7 @@ void server_setup()
             if (request_page_U32<=page_count_U32)
             {
                 char filenames[1000];
-                GetFileName(filenames,request_page_U32);
+                GetFileName_Web(filenames,request_page_U32);
                 char resp[1000];
                 sprintf((char *)resp, HTML_FILE, filenames, request_page_U32-1, request_page_U32, page_count_U32 - 1, request_page_U32+1);
                 // Serial.println("Resp Get Name File Page Web request!");
@@ -247,7 +306,11 @@ void server_setup()
 
     sv.on("/DeleteAllFiles",DeleteAllFiles);
 
+    sv.on("/GetNames",GetName);
+
     sv.onNotFound(NotFound);
+
+    sv.on("/GetSize",GetSize);
 }
 
 void server_start()

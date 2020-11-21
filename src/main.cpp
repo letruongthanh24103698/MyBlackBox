@@ -1,5 +1,7 @@
 #include <Arduino.h>
 
+#include <WiFi.h>
+
 #include "FS.h"
 #include "SD.h"
 #include "SPI.h"
@@ -30,9 +32,11 @@ uint8_t Buffer_AU8[200];
 uint8_t SentenceBuffer_AU8[200];
 uint8_t GPRMCBuffer_AU8[200];
 bool GetTimeDone_B=false;
-bool OpenWirelessMode_B=false;
-bool CloseWirelessMode_B=false;
+bool ChangeModeWirelessWIFI_B=false;
+bool ChangeModeWirelessBLE_B=false;
 bool IsWirelessRunning_B=false;
+bool IsWirelessWIFIRunning_B=false;
+bool IsWirelessBLERunning_B=false;
 bool DecodeTime_B=false;
 bool SaveTime_B=false;
 
@@ -91,19 +95,21 @@ void readFile(fs::FS &fs, const char * path, uint8_t *buffer_AU8, uint64_t *size
 
   File file = fs.open(path);
   if(!file){
-      Serial.println("Failed to open file for reading");
-      if (!IsWirelessRunning_B)
-          GPIOWrite(_ONBOARD_LED_PIN_,0);
-      return;
+    Serial.println("Failed to open file for reading");
+    if (!IsWirelessRunning_B)
+        GPIOWrite(_ONBOARD_LED_PIN_,0);
+    return;
   }
 
-  if (!IsWirelessRunning_B)
-          GPIOWrite(_ONBOARD_LED_PIN_,1);
-  Serial.print("Read from file: ");\
+  if (!IsWirelessRunning_B) 
+  {
+    GPIOWrite(_ONBOARD_LED_PIN_,1);
+    Serial.print("Read from file: ");
+  }
   
   *size=0;
   while(file.available())
-      buffer_AU8[(*size)++]=(uint8_t)(file.read());
+    buffer_AU8[(*size)++]=(uint8_t)(file.read());
 
   file.close();
 }
@@ -278,13 +284,13 @@ void GPS_Receive_Handle(uint8_t ch)
 
 void PPS_INT_Handle()
 {
-  if (OpenWirelessMode_B || IsWirelessRunning_B)
+  if (IsWirelessRunning_B)
   {
     Serial.flush();
     return;
   }
 
-  while (!OpenWirelessMode_B && !IsWirelessRunning_B && !SaveTime_B)
+  while (!IsWirelessRunning_B && !SaveTime_B)
   {
     RxData_I32=Serial2.read();
 
@@ -303,12 +309,12 @@ void PPS_INT_Handle()
 
 void Button_Left_Handle()
 {
-  OpenWirelessMode_B=true;
+  ChangeModeWirelessWIFI_B=true;
 }
 
 void Button_Right_Handle()
 {
-  CloseWirelessMode_B=true;
+  ChangeModeWirelessBLE_B=true;
 }
 
 void CreateBlankFile()
@@ -399,35 +405,74 @@ void setup() {
 
   Serial.println("Start...");
   GPIOWrite(_ONBOARD_LED_PIN_,1);
+  Serial.print("1Ram Left:");
+  Serial.println(esp_get_free_heap_size());
   // OpenWirelessMode_B=true;
+
+  wireless_setup();
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
-  if (OpenWirelessMode_B)
+  if (ChangeModeWirelessWIFI_B)
   {
-    GPIOWrite(_ONBOARD_LED_PIN_,0);
-    OpenWirelessMode_B=false;
-    IsWirelessRunning_B=true;
-    GPIOWrite(_LED_LEFT_PIN_,0);
-    GPIOWrite(_LED_RIGHT_PIN_,0);
-    wireless_start();
+    ChangeModeWirelessWIFI_B=false;
+    IsWirelessWIFIRunning_B=!IsWirelessWIFIRunning_B;
+    if (IsWirelessWIFIRunning_B)
+    {
+      GPIOWrite(_LED_LEFT_PIN_,0);
+      GPIOWrite(_LED_RIGHT_PIN_,0);
+      wirelessWIFI_start();
+      Serial.print("2Ram Left:");
+      Serial.println(esp_get_free_heap_size());
+    }
+    else
+    {
+      GPIOWrite(_LED_LEFT_PIN_,0);
+      GPIOWrite(_LED_RIGHT_PIN_,0);
+      wirelessWIFI_stop();
+      Serial.print("3Ram Left:");
+      Serial.println(esp_get_free_heap_size());
+    }
   }
 
-  if (CloseWirelessMode_B)
+  if (ChangeModeWirelessBLE_B)
   {
-    GPIOWrite(_ONBOARD_LED_PIN_,1);
-    CloseWirelessMode_B=false;
-    IsWirelessRunning_B=false;
-    GPIOWrite(_LED_LEFT_PIN_,0);
-    GPIOWrite(_LED_RIGHT_PIN_,0);
-    wireless_stop();
+    ChangeModeWirelessBLE_B=false;
+    IsWirelessBLERunning_B=!IsWirelessBLERunning_B;
+    if (IsWirelessBLERunning_B)
+    {
+      GPIOWrite(_LED_LEFT_PIN_,0);
+      GPIOWrite(_LED_RIGHT_PIN_,0);
+      wirelessBLE_start();
+      Serial.print("4Ram Left:");
+      Serial.println(esp_get_free_heap_size());
+    }
+    else
+    {
+      GPIOWrite(_LED_LEFT_PIN_,0);
+      GPIOWrite(_LED_RIGHT_PIN_,0);
+      wirelessBLE_stop();
+      Serial.print("5Ram Left:");
+      Serial.println(esp_get_free_heap_size());
+    }
   }
 
+  IsWirelessRunning_B=IsWirelessBLERunning_B | IsWirelessWIFIRunning_B;
   if (IsWirelessRunning_B)
+    GPIOWrite(_ONBOARD_LED_PIN_,0);
+  else
+    GPIOWrite(_ONBOARD_LED_PIN_,1);
+
+  if (IsWirelessWIFIRunning_B)
   {
-    wireless_loop();
+    wirelessWIFI_loop();
     server_loop();
+  }
+
+  if (IsWirelessBLERunning_B)
+  {
+    wirelessBLE_loop();
   }
 
   PPS_INT_Handle();

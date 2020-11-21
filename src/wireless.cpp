@@ -20,6 +20,13 @@
 #include "wireless.h"
 #include "Server.h"
 
+hw_timer_t * timerWIFI = NULL;
+hw_timer_t * timerBLE = NULL;
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+
+bool ChangeWIFILedStatus_B=false;
+bool ChangeBLELedStatus_B=false;
+
 /** Build time */
 const char compileDate[] = __DATE__ " " __TIME__;
 
@@ -82,12 +89,14 @@ class MyServerCallbacks: public BLEServerCallbacks {
 	// TODO this doesn't take into account several clients being connected
 	void onConnect(BLEServer* pServer) {
 		Serial.println("BLE client connected");
+		timerAlarmDisable(timerBLE);
         GPIOWrite(_BLE_CONNECTION_STATUS_PIN_,1);
 	};
 
 	void onDisconnect(BLEServer* pServer) {
 		Serial.println("BLE client disconnected");
-        GPIOWrite(_BLE_CONNECTION_STATUS_PIN_,0);
+		timerAlarmEnable(timerBLE);
+        // GPIOWrite(_BLE_CONNECTION_STATUS_PIN_,0);
 		pAdvertising->start();
 	}
 };
@@ -238,6 +247,7 @@ void deinitBLE()
 
 /** Callback for receiving IP address from AP */
 void gotIP(system_event_id_t event) {
+	timerAlarmDisable(timerWIFI);
     GPIOWrite(_WIFI_CONNECTION_STATUS_PIN_,1);
 	server_start();
 	isConnected = true;
@@ -246,7 +256,8 @@ void gotIP(system_event_id_t event) {
 
 /** Callback for connection loss */
 void lostCon(system_event_id_t event) {
-    GPIOWrite(_WIFI_CONNECTION_STATUS_PIN_,0);
+	timerAlarmEnable(timerWIFI);
+    // GPIOWrite(_WIFI_CONNECTION_STATUS_PIN_,0);
 	server_stop();
 	isConnected = false;
 	connStatusChanged = true;
@@ -396,15 +407,47 @@ void wireless_setup()
 		Serial.println("Could not find preferences, need send data over BLE");
 	}
 	preferences.end();
-
-	// Start BLE server
-	initBLE();
-
-    WiFi_Check();
+	
+	timerWIFI=timerBegin(0,80,true);
+	timerBLE=timerBegin(1,80,true);
 }
 
-void wireless_loop() 
+void IRAM_ATTR onTimerRight() {
+	portENTER_CRITICAL_ISR(&timerMux);
+	ChangeBLELedStatus_B=true;
+	portEXIT_CRITICAL_ISR(&timerMux);
+}
+
+void IRAM_ATTR onTimerLeft() {
+	portENTER_CRITICAL_ISR(&timerMux);
+	ChangeWIFILedStatus_B=true;
+	portEXIT_CRITICAL_ISR(&timerMux);
+}
+
+void wirelessWIFI_stop()
 {
+    WiFi.mode(WIFI_OFF);
+    isConnected=false;
+	Serial.println("Wireless WIFI Stopped!");
+}
+
+void wirelessWIFI_start()
+{
+	timerAttachInterrupt(timerWIFI, &onTimerLeft, true);
+	timerAlarmWrite(timerWIFI, 500000, true);
+	timerAlarmEnable(timerWIFI);
+    WiFi_Check();
+	Serial.println("Wireless WIFI Started!");
+}
+
+void wirelessWIFI_loop() 
+{
+	if (ChangeWIFILedStatus_B)
+	{
+		ChangeWIFILedStatus_B=false;
+		GPIOToggle(_WIFI_CONNECTION_STATUS_PIN_);
+	}
+
 	if (connStatusChanged) 
     {
 		if (isConnected) 
@@ -423,16 +466,27 @@ void wireless_loop()
     connStatusChanged = false;
 }
 
-void wireless_stop()
+void wirelessBLE_stop()
 {
     BLEDevice::deinit(false);
-    WiFi.mode(WIFI_STA);
     btStop();
-    isConnected=false;
-	Serial.println("Wireless Stopped!");
+	Serial.println("Wireless BLE Stopped!");
 }
 
-void wireless_start()
+void wirelessBLE_start()
 {
-    wireless_setup();
+	initBLE();
+	timerAttachInterrupt(timerBLE, &onTimerRight, true);
+	timerAlarmWrite(timerBLE, 500000, true);
+	timerAlarmEnable(timerBLE);
+	Serial.println("Wireless BLE Started!");
+}
+
+void wirelessBLE_loop()
+{
+	if (ChangeBLELedStatus_B)
+	{
+		ChangeBLELedStatus_B=false;
+		GPIOToggle(_BLE_CONNECTION_STATUS_PIN_);
+	}
 }

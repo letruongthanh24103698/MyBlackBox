@@ -6,6 +6,7 @@
 #define GPIOInit(_PIN_,_MODE_)              pinMode(_PIN_,_MODE_)
 #define GPIOWrite(_PIN_,_STATE_)            digitalWrite(_PIN_,_STATE_)
 #define GPIORead(_PIN_)                     digitalRead(_PIN_)
+#define GPIOToggle(_PIN_)                   GPIOWrite(_PIN_,1-GPIORead(_PIN_))
 #define GPIOAttachINT(_PIN_,_FUNC_,_MODE_)  attachInterrupt(_PIN_,_FUNC_,_MODE_)
 
 #define _GPS_EN_PIN_              4 //GPIO4

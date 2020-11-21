@@ -4,11 +4,14 @@
 #include <Arduino.h>
 #include "header.h"
 
-#define _BLE_CONNECTION_STATUS_PIN_     _LED_LEFT_PIN_
-#define _WIFI_CONNECTION_STATUS_PIN_    _LED_RIGHT_PIN_
+#define _BLE_CONNECTION_STATUS_PIN_     _LED_RIGHT_PIN_
+#define _WIFI_CONNECTION_STATUS_PIN_    _LED_LEFT_PIN_
 
 void wireless_setup();
-void wireless_loop();
-void wireless_start();
-void wireless_stop();
+void wirelessWIFI_loop();
+void wirelessWIFI_start();
+void wirelessWIFI_stop();
+void wirelessBLE_loop();
+void wirelessBLE_start();
+void wirelessBLE_stop();
 #endif
