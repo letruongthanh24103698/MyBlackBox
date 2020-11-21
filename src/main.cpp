@@ -25,13 +25,16 @@ SPIClass SPI_SD(VSPI);
 char Path[100]="/datalog_ESP32_default.txt";
 uint8_t Size_U8=0;
 uint8_t SentenceSize_U8=0;
+uint8_t GPRMCSize_U8=0;
 uint8_t Buffer_AU8[200];
 uint8_t SentenceBuffer_AU8[200];
+uint8_t GPRMCBuffer_AU8[200];
 bool GetTimeDone_B=false;
 bool OpenWirelessMode_B=false;
 bool CloseWirelessMode_B=false;
 bool IsWirelessRunning_B=false;
 bool DecodeTime_B=false;
+bool SaveTime_B=false;
 
 TaskHandle_t Task1;
 
@@ -41,15 +44,20 @@ void writeFile(fs::FS &fs, const char * path, const char * message){
     File file = fs.open(path, FILE_WRITE);
     if(!file){
         Serial.println("Failed to open file for writing");
-        GPIOWrite(_ONBOARD_LED_PIN_,0);
+        if (!IsWirelessRunning_B)
+          GPIOWrite(_ONBOARD_LED_PIN_,0);
         return;
     }
     if(file.print(message)){
-        // Serial.println("File written");
-        GPIOWrite(_ONBOARD_LED_PIN_,1);
+        if (!IsWirelessRunning_B)
+        {
+          Serial.println("File written");
+          GPIOWrite(_ONBOARD_LED_PIN_,1);
+        }
     } else {
         Serial.println("Write failed");
-        GPIOWrite(_ONBOARD_LED_PIN_,0);
+        if (!IsWirelessRunning_B)
+          GPIOWrite(_ONBOARD_LED_PIN_,0);
     }
     file.close();
 }
@@ -60,15 +68,20 @@ void appendFile(fs::FS &fs, const char * path, const char * message){
     File file = fs.open(path, FILE_APPEND);
     if(!file){
         Serial.println("Failed to open file for appending");
-        GPIOWrite(_ONBOARD_LED_PIN_,0);
+        if (!IsWirelessRunning_B)
+          GPIOWrite(_ONBOARD_LED_PIN_,0);
         return;
     }
     if(file.print(message)){
-        // Serial.println("Message appended");
-        GPIOWrite(_ONBOARD_LED_PIN_,1);
+        if (!IsWirelessRunning_B)
+        {
+          Serial.println("File appended");
+          GPIOWrite(_ONBOARD_LED_PIN_,1);
+        }
     } else {
         Serial.println("Append failed");
-        GPIOWrite(_ONBOARD_LED_PIN_,0);
+        if (!IsWirelessRunning_B)
+          GPIOWrite(_ONBOARD_LED_PIN_,0);
     }
     file.close();
 }
@@ -79,11 +92,13 @@ void readFile(fs::FS &fs, const char * path, uint8_t *buffer_AU8, uint64_t *size
   File file = fs.open(path);
   if(!file){
       Serial.println("Failed to open file for reading");
-      GPIOWrite(_ONBOARD_LED_PIN_,0);
+      if (!IsWirelessRunning_B)
+          GPIOWrite(_ONBOARD_LED_PIN_,0);
       return;
   }
 
-  GPIOWrite(_ONBOARD_LED_PIN_,1);
+  if (!IsWirelessRunning_B)
+          GPIOWrite(_ONBOARD_LED_PIN_,1);
   Serial.print("Read from file: ");\
   
   *size=0;
@@ -134,20 +149,25 @@ void RenameFile(char *buf)
   memcpy(newname+31, "_GMT0.txt", 9);
   Serial.println(newname);
   SD.rename(Path, newname);
-  memcpy(Path,newname, strlen(buf));
+  memcpy(Path,newname, strlen(newname)+1);
+}
+
+void Save_Sentence()
+{
+    appendFile(SD, Path, (char *)SentenceBuffer_AU8);
+    Serial.print((char *)SentenceBuffer_AU8);
+    SaveTime_B=false;
 }
 
 void Decode_Sentence()
 {
   DecodeTime_B=false;
-  uint8_t *buf=SentenceBuffer_AU8;
-  uint8_t len=SentenceSize_U8;
+  uint8_t *buf=GPRMCBuffer_AU8;
+  uint8_t len=GPRMCSize_U8;
   buf[len]=0;
-  appendFile(SD, Path, (char *)buf);
   int16_t pos=0;
   int16_t nextpos=0;
   float speed=-1;
-
 
   if (len<=6)
     return;
@@ -158,8 +178,8 @@ void Decode_Sentence()
     //Get Date
     if (!GetTimeDone_B)
     {
-      buf=SentenceBuffer_AU8;
-      len=SentenceSize_U8;
+      buf=GPRMCBuffer_AU8;
+      len=GPRMCSize_U8;
       for (uint8_t i=0; i<_GPRMC_DATE_ORDER_; i++)
       {
         pos=GetCharPos(buf,len,',');
@@ -181,8 +201,8 @@ void Decode_Sentence()
     }
     
     //Get Speed
-    buf=SentenceBuffer_AU8;
-    len=SentenceSize_U8;
+    buf=GPRMCBuffer_AU8;
+    len=GPRMCSize_U8;
     for (uint8_t i=0; i<_GPRMC_SPEED_ORDER_; i++)
     {
       pos=GetCharPos(buf,len,',');
@@ -206,8 +226,8 @@ void Decode_Sentence()
     //GetTime
     if (!GetTimeDone_B)
     {
-      buf=SentenceBuffer_AU8;
-      len=SentenceSize_U8;
+      buf=GPRMCBuffer_AU8;
+      len=GPRMCSize_U8;
       for (uint8_t i=0; i<_GPRMC_TIME_ORDER_; i++)
       {
         pos=GetCharPos(buf,len,',');
@@ -238,22 +258,22 @@ void Decode_Sentence()
 
 void GPS_Receive_Handle(uint8_t ch)
 {
+  Buffer_AU8[Size_U8++]=ch;
   if (ch=='\n')
   {
+    Buffer_AU8[Size_U8]=0;
+    SentenceSize_U8 = Size_U8;
+    memcpy(SentenceBuffer_AU8, Buffer_AU8, SentenceSize_U8+1);
+    SaveTime_B=true;
     if (memcmp(Buffer_AU8,"$GPRMC",6)==0)
     {
-      SentenceSize_U8 = Size_U8;
-      memcpy(SentenceBuffer_AU8, Buffer_AU8, SentenceSize_U8);
+      GPRMCSize_U8 = Size_U8;
+      memcpy(GPRMCBuffer_AU8, Buffer_AU8, GPRMCSize_U8+1);
       // Decode_Sentence();
       DecodeTime_B=true;
     }
     Size_U8=0;
-  }
-  else
-  {
-    Buffer_AU8[Size_U8++]=ch;
-  }
-  
+  }  
 }
 
 void PPS_INT_Handle()
@@ -264,7 +284,7 @@ void PPS_INT_Handle()
     return;
   }
 
-  while (!OpenWirelessMode_B && !IsWirelessRunning_B)
+  while (!OpenWirelessMode_B && !IsWirelessRunning_B && !SaveTime_B)
   {
     RxData_I32=Serial2.read();
 
@@ -299,12 +319,20 @@ void CreateBlankFile()
     File myfile = SD.open(Path, FILE_WRITE);
     myfile.close();
   }
+  else
+  {
+    File myfile = SD.open(Path, FILE_WRITE);
+    myfile.close();
+  }
+
 }
 
 void Task1code( void * pvParameters )
 {
   for(;;)
   {
+    if (SaveTime_B)
+      Save_Sentence();
     if (DecodeTime_B)
       Decode_Sentence();
     vTaskDelay(10);
@@ -323,12 +351,19 @@ void setup() {
       Serial.println("Card Mount Failed");
       return;
   }
-
+  /*File root=SD.open("/");
+  uint32_t cnt=0;
+  while (1)
+  {
+    File entry=root.openNextFile();
+    if (!entry)
+      break;
+    SD.remove(entry.name());
+    Serial.println(cnt++);
+  }
+  Serial.println("Delete Done");*/
   CreateBlankFile();
 
-  /*uint8_t temp[4];
-  uint64_t size;
-  readFile(SD, Path ,temp, &size);*/
   GPIOInit(_GPS_EN_PIN_,OUTPUT);
   GPIOWrite(_GPS_EN_PIN_,1);
 
@@ -364,6 +399,7 @@ void setup() {
 
   Serial.println("Start...");
   GPIOWrite(_ONBOARD_LED_PIN_,1);
+  // OpenWirelessMode_B=true;
 }
 
 void loop() {
@@ -391,6 +427,7 @@ void loop() {
   if (IsWirelessRunning_B)
   {
     wireless_loop();
+    server_loop();
   }
 
   PPS_INT_Handle();

@@ -7,6 +7,8 @@
 #include "AsyncTCP.h"
 #include "ESPAsyncWebServer.h"
 
+#include "SD.h"
+
 
 const char* ssid     = "MyBlackBox-Access-Point";
 const char* password = "123456789";
@@ -91,6 +93,7 @@ void setup_wifi_ap()
         request->send(200, "text/html", "HTTP GET request sent to your ESP on input field (" 
                                         + inputParam + ") with value: " + inputMessage +
                                         "<br><a href=\"/\">Return to Home Page</a>");
+        request->send(SD, "/test.jpg", "image/jpeg");
     });
     server.onNotFound(notFound);
     server.begin();

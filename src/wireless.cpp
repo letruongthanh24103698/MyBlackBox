@@ -338,16 +338,17 @@ void connectWiFi() {
 	WiFi.disconnect(true);
 	WiFi.enableSTA(true);
 	WiFi.mode(WIFI_STA);
+	// WiFi.setSleep(false);
 
 	Serial.println();
 	Serial.print("Start connection to ");
-	if (usePrimAP) {
+	// if (usePrimAP) {
 		Serial.println(ssidPrim);
 		WiFi.begin(ssidPrim.c_str(), pwPrim.c_str());
-	} else {
-		Serial.println(ssidSec);
-		WiFi.begin(ssidSec.c_str(), pwSec.c_str());
-	}
+	// } else {
+		// Serial.println(ssidSec);
+		// WiFi.begin(ssidSec.c_str(), pwSec.c_str());
+	// }
 }
 
 void WiFi_Check()
@@ -356,11 +357,13 @@ void WiFi_Check()
     {
         Serial.println("Lost WiFi connection");
         // Received WiFi credentials
-        if (!scanWiFi()) { // Check for available AP's
+        /*if (!scanWiFi()) { // Check for available AP's
             Serial.println("Could not find any AP");
+			connStatusChanged=true;
         } else { // If AP was found, start connection
             connectWiFi();
-        }
+        }*/
+		connectWiFi();
     }
 }
 
