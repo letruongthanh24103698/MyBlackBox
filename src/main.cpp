@@ -22,14 +22,17 @@
 #define _SPEED_THRESH_HOLD_       40.0
 #define _SPEED_THRESH_HOLD_DELTA_ 1.0
 
+#define _SIZE_TO_WRITE_           1000
 int32_t RxData_I32;
 SPIClass SPI_SD(VSPI);
 char Path[100]="/datalog_ESP32_default.txt";
 uint8_t Size_U8=0;
-uint8_t SentenceSize_U8=0;
+uint8_t WriteSize_U8=0;
+uint8_t WriteSizeCPY_U8=0;
 uint8_t GPRMCSize_U8=0;
 uint8_t Buffer_AU8[200];
-uint8_t SentenceBuffer_AU8[200];
+uint8_t WriteBuffer_AU8[_SIZE_TO_WRITE_+1];
+uint8_t WriteBufferCPY_AU8[_SIZE_TO_WRITE_+1];
 uint8_t GPRMCBuffer_AU8[200];
 bool GetTimeDone_B=false;
 bool ChangeModeWirelessWIFI_B=false;
@@ -55,11 +58,11 @@ void writeFile(fs::FS &fs, const char * path, const char * message){
     if(file.print(message)){
         if (!IsWirelessRunning_B)
         {
-          Serial.println("File written");
+          // Serial.println("File written");
           GPIOWrite(_ONBOARD_LED_PIN_,1);
         }
     } else {
-        Serial.println("Write failed");
+        // Serial.println("Write failed");
         if (!IsWirelessRunning_B)
           GPIOWrite(_ONBOARD_LED_PIN_,0);
     }
@@ -79,11 +82,11 @@ void appendFile(fs::FS &fs, const char * path, const char * message){
     if(file.print(message)){
         if (!IsWirelessRunning_B)
         {
-          Serial.println("File appended");
+          // Serial.println("File appended");
           GPIOWrite(_ONBOARD_LED_PIN_,1);
         }
     } else {
-        Serial.println("Append failed");
+        // Serial.println("Append failed");
         if (!IsWirelessRunning_B)
           GPIOWrite(_ONBOARD_LED_PIN_,0);
     }
@@ -104,7 +107,7 @@ void readFile(fs::FS &fs, const char * path, uint8_t *buffer_AU8, uint64_t *size
   if (!IsWirelessRunning_B) 
   {
     GPIOWrite(_ONBOARD_LED_PIN_,1);
-    Serial.print("Read from file: ");
+    // Serial.print("Read from file: ");
   }
   
   *size=0;
@@ -160,8 +163,8 @@ void RenameFile(char *buf)
 
 void Save_Sentence()
 {
-    appendFile(SD, Path, (char *)SentenceBuffer_AU8);
-    Serial.print((char *)SentenceBuffer_AU8);
+    appendFile(SD, Path, (char *)WriteBufferCPY_AU8);
+    // Serial.print((char *)SentenceBuffer_AU8);
     SaveTime_B=false;
 }
 
@@ -265,12 +268,18 @@ void Decode_Sentence()
 void GPS_Receive_Handle(uint8_t ch)
 {
   Buffer_AU8[Size_U8++]=ch;
+  WriteBuffer_AU8[WriteSize_U8++]=ch;
+  if (WriteSize_U8==_SIZE_TO_WRITE_)
+  {
+    WriteBuffer_AU8[WriteSize_U8]=0;
+    memcpy(WriteBufferCPY_AU8, WriteBuffer_AU8, WriteSize_U8+1);
+    WriteSizeCPY_U8=WriteSize_U8;
+    SaveTime_B=true;
+  }
+
   if (ch=='\n')
   {
     Buffer_AU8[Size_U8]=0;
-    SentenceSize_U8 = Size_U8;
-    memcpy(SentenceBuffer_AU8, Buffer_AU8, SentenceSize_U8+1);
-    SaveTime_B=true;
     if (memcmp(Buffer_AU8,"$GPRMC",6)==0)
     {
       GPRMCSize_U8 = Size_U8;
@@ -290,7 +299,7 @@ void PPS_INT_Handle()
     return;
   }
 
-  while (!IsWirelessRunning_B && !SaveTime_B)
+  while (!IsWirelessRunning_B)
   {
     RxData_I32=Serial2.read();
 
@@ -351,6 +360,7 @@ void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
   Serial2.begin(9600);
+  Serial2.setRxBufferSize(9192);
 
   SPI_SD.begin(18,19,23,5);
     if(!SD.begin(_SD_CS_PIN_,SPI_SD)){
@@ -403,13 +413,11 @@ void setup() {
                     &Task1,      /* Task handle to keep track of created task */
                     0);          /* pin task to core 0 */      
 
-  Serial.println("Start...");
-  GPIOWrite(_ONBOARD_LED_PIN_,1);
-  Serial.print("1Ram Left:");
-  Serial.println(esp_get_free_heap_size());
   // OpenWirelessMode_B=true;
 
   wireless_setup();
+  Serial.println("Start...");
+  GPIOWrite(_ONBOARD_LED_PIN_,1);
 }
 
 void loop() {
@@ -421,7 +429,6 @@ void loop() {
     if (IsWirelessWIFIRunning_B)
     {
       GPIOWrite(_LED_LEFT_PIN_,0);
-      GPIOWrite(_LED_RIGHT_PIN_,0);
       wirelessWIFI_start();
       Serial.print("2Ram Left:");
       Serial.println(esp_get_free_heap_size());
@@ -429,7 +436,6 @@ void loop() {
     else
     {
       GPIOWrite(_LED_LEFT_PIN_,0);
-      GPIOWrite(_LED_RIGHT_PIN_,0);
       wirelessWIFI_stop();
       Serial.print("3Ram Left:");
       Serial.println(esp_get_free_heap_size());
@@ -442,7 +448,6 @@ void loop() {
     IsWirelessBLERunning_B=!IsWirelessBLERunning_B;
     if (IsWirelessBLERunning_B)
     {
-      GPIOWrite(_LED_LEFT_PIN_,0);
       GPIOWrite(_LED_RIGHT_PIN_,0);
       wirelessBLE_start();
       Serial.print("4Ram Left:");
@@ -450,7 +455,6 @@ void loop() {
     }
     else
     {
-      GPIOWrite(_LED_LEFT_PIN_,0);
       GPIOWrite(_LED_RIGHT_PIN_,0);
       wirelessBLE_stop();
       Serial.print("5Ram Left:");

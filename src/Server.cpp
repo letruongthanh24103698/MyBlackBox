@@ -8,6 +8,8 @@
 
 #define _MAX_NUMBER_FILE_PER_PAGE_      5
 #define _MAX_BYTE_PER_TIME_             1000
+#define _DEFAULT_PART_                  0
+#define _DEFAULT_PART_SIZE_             50000
 
 WebServer sv(80);
 
@@ -69,9 +71,9 @@ uint32_t GetFileCount()
         if (! entry) 
             break;
 
-        Serial.print(entry.name());
-        Serial.print(" ");
-        Serial.println(entry.size());
+        // Serial.print(entry.name());
+        // Serial.print(" ");
+        // Serial.println(entry.size());
         
         cnt++;
         entry.close();
@@ -113,7 +115,7 @@ void NotFound() {
     sv.send(404, "text/plain", "Not found");
 }
 
-void GetFile()
+void GetFile_Web()
 {
     String inputMessage;
     
@@ -145,7 +147,7 @@ void GetFile()
             // Serial.println("start");
             Serial.print("Ram Left:");
             Serial.println(esp_get_free_heap_size());
-            char buffer[_MAX_BYTE_PER_TIME_+2];
+            char *buffer=(char*)malloc((_MAX_BYTE_PER_TIME_+2)*sizeof(char));
             uint32_t cnt=0;
             uint32_t count=0;
             uint32_t available;
@@ -157,6 +159,8 @@ void GetFile()
                 cnt = (available > _MAX_BYTE_PER_TIME_)?_MAX_BYTE_PER_TIME_:available;
                 count+= tmp.readBytes(buffer, cnt);
                 sv.client().write(buffer,cnt);
+                if (!sv.client().connected())
+                    break;
                 /*buffer[cnt++]=(char)(tmp.read());
                 if (cnt==_MAX_BYTE_PER_TIME_)
                 {
@@ -175,8 +179,9 @@ void GetFile()
             // sv.client().print(buffer);
             // sv.client().flush();
             // Serial.println(buffer);
-            sv.streamFile(tmp, "text/plain");
+            // sv.streamFile(tmp, "text/plain");
             // sv.client().flush();
+            free(buffer);
             tmp.close();
             Serial.println(count);
             return;
@@ -217,9 +222,13 @@ void GetName()
         if (! entry) 
             break;
 
-        uint8_t size=strlen(entry.name());
-        memcpy(buf+len,entry.name(),size);
-        len+=size;
+        uint8_t namesize=strlen(entry.name());
+        memcpy(buf+len,entry.name(),namesize);
+        len+=namesize;
+        String size=String(entry.size());
+        buf[len++]='|';
+        memcpy(buf+len,size.c_str(),strlen(size.c_str()));
+        len+=strlen(size.c_str());
         buf[len++]=',';
         entry.close();
     }
@@ -257,7 +266,75 @@ void GetSize()
             return;
         }
     } 
-    sv.send(404,"text/plain","-1");
+    sv.send(404,"text/plain","-1"); 
+}
+
+void GetFile()
+{
+    if (sv.hasArg("name"))
+    {
+        String name="/"+sv.arg("name");
+        if (SD.exists(name))
+        {
+            File entry=SD.open(name);
+            uint32_t size=entry.size();
+
+            uint32_t part=_DEFAULT_PART_;
+            uint32_t partsize=_DEFAULT_PART_SIZE_;
+
+            if (sv.hasArg("part"))
+                part=atoi(sv.arg("part").c_str());
+
+            if (sv.hasArg("partsize"))
+                partsize=atoi(sv.arg("partsize").c_str());
+            
+            if (ceil((double)size/(double)partsize)>part)
+            {
+                entry.seek(partsize * part);
+
+                String resp;
+                uint32_t sizeresp= min(partsize,entry.size());
+                sv._prepareHeader(resp,200,"text/plain",sizeresp);
+                sv.client().print(resp.c_str());
+
+                char *buffer=(char*)malloc((_MAX_BYTE_PER_TIME_+2)*sizeof(char));
+                uint32_t cnt=0;
+                uint32_t count=0;
+                uint32_t available=partsize;
+                do
+                {
+                    available-=cnt;
+                    if (available==0)
+                        break;
+                    cnt = (available > _MAX_BYTE_PER_TIME_)?_MAX_BYTE_PER_TIME_:available;
+                    count+= entry.readBytes(buffer, cnt);
+                    sv.client().write(buffer,cnt);
+                    if (!sv.client().connected())
+                        break;
+                }while(true);
+                free(buffer);
+                return;
+            }
+        }
+    }
+
+    sv.send(404,"text/plain","");
+}
+
+void DelFile()
+{
+    if (sv.hasArg("name"))
+    {
+        String name="/"+sv.arg("name");
+        if (SD.exists(name))
+        {
+            SD.remove(name);
+            sv.send(200,"text/plain","Successfully");
+            return;
+        }
+    }
+
+    sv.send(404,"text/plain","Failed");
 }
 
 uint32_t file_count_U32;
@@ -272,7 +349,7 @@ void server_setup()
         sv.client().flush();
     });
 
-    sv.on ("/GetNameFile", [](){
+    sv.on ("/Get_Name", [](){
         // Serial.println("Get Name File Page Web request!");
         uint32_t page_count_U32=ceil((double)file_count_U32/(double)_MAX_NUMBER_FILE_PER_PAGE_);
         Serial.println(file_count_U32);
@@ -286,14 +363,16 @@ void server_setup()
             request_page_U32=atoi(inputMessage.c_str());
             if (request_page_U32<=page_count_U32)
             {
-                char filenames[1000];
+                char *filenames=(char *)malloc(1000*sizeof(char));
                 GetFileName_Web(filenames,request_page_U32);
-                char resp[1000];
+                char *resp=(char *) malloc(1000*sizeof(char));
                 sprintf((char *)resp, HTML_FILE, filenames, request_page_U32-1, request_page_U32, page_count_U32 - 1, request_page_U32+1);
                 // Serial.println("Resp Get Name File Page Web request!");
                 Serial.println(resp);
                 sv.send_P(200, "text/html", resp);
                 sv.client().flush();
+                free(filenames);
+                free(resp);
                 return;
             }
         }
@@ -302,15 +381,19 @@ void server_setup()
         sv.client().flush();
     });
 
-    sv.on("/GetFile",GetFile);
+    sv.on("/Get_File",GetFile_Web);
 
     sv.on("/DeleteAllFiles",DeleteAllFiles);
 
     sv.on("/GetNames",GetName);
 
-    sv.onNotFound(NotFound);
-
     sv.on("/GetSize",GetSize);
+
+    sv.on("/GetFile",GetFile);
+
+    sv.on("/DelFile",DelFile);
+
+    sv.onNotFound(NotFound);
 }
 
 void server_start()
