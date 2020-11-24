@@ -22,18 +22,18 @@
 #define _SPEED_THRESH_HOLD_       40.0
 #define _SPEED_THRESH_HOLD_DELTA_ 1.0
 
-#define _SIZE_TO_WRITE_           1000
+#define _SENTENCE_TO_WRITE_           10
 int32_t RxData_I32;
 SPIClass SPI_SD(VSPI);
 char Path[100]="/datalog_ESP32_default.txt";
 uint8_t Size_U8=0;
-uint8_t WriteSize_U8=0;
-uint8_t WriteSizeCPY_U8=0;
-uint8_t GPRMCSize_U8=0;
+uint32_t WriteSize_U32=0;
+// uint8_t WriteSizeCPY_U8=0;
+// uint8_t GPRMCSize_U8=0;
 uint8_t Buffer_AU8[200];
-uint8_t WriteBuffer_AU8[_SIZE_TO_WRITE_+1];
-uint8_t WriteBufferCPY_AU8[_SIZE_TO_WRITE_+1];
-uint8_t GPRMCBuffer_AU8[200];
+uint8_t WriteBuffer_AU8[1001];
+// uint8_t WriteBufferCPY_AU8[1001];
+// uint8_t GPRMCBuffer_AU8[200];
 bool GetTimeDone_B=false;
 bool ChangeModeWirelessWIFI_B=false;
 bool ChangeModeWirelessBLE_B=false;
@@ -42,6 +42,7 @@ bool IsWirelessWIFIRunning_B=false;
 bool IsWirelessBLERunning_B=false;
 bool DecodeTime_B=false;
 bool SaveTime_B=false;
+uint8_t NumberOfSentence_U8=0;
 
 TaskHandle_t Task1;
 
@@ -82,11 +83,11 @@ void appendFile(fs::FS &fs, const char * path, const char * message){
     if(file.print(message)){
         if (!IsWirelessRunning_B)
         {
-          // Serial.println("File appended");
+          Serial.println("File appended");
           GPIOWrite(_ONBOARD_LED_PIN_,1);
         }
     } else {
-        // Serial.println("Append failed");
+        Serial.println("Append failed");
         if (!IsWirelessRunning_B)
           GPIOWrite(_ONBOARD_LED_PIN_,0);
     }
@@ -163,16 +164,17 @@ void RenameFile(char *buf)
 
 void Save_Sentence()
 {
-    appendFile(SD, Path, (char *)WriteBufferCPY_AU8);
+    appendFile(SD, Path, (char *)WriteBuffer_AU8);
     // Serial.print((char *)SentenceBuffer_AU8);
+    WriteSize_U32=0;
     SaveTime_B=false;
 }
 
 void Decode_Sentence()
 {
   DecodeTime_B=false;
-  uint8_t *buf=GPRMCBuffer_AU8;
-  uint8_t len=GPRMCSize_U8;
+  uint8_t *buf=Buffer_AU8;
+  uint8_t len=Size_U8;
   buf[len]=0;
   int16_t pos=0;
   int16_t nextpos=0;
@@ -187,8 +189,8 @@ void Decode_Sentence()
     //Get Date
     if (!GetTimeDone_B)
     {
-      buf=GPRMCBuffer_AU8;
-      len=GPRMCSize_U8;
+      buf=Buffer_AU8;
+      len=Size_U8;
       for (uint8_t i=0; i<_GPRMC_DATE_ORDER_; i++)
       {
         pos=GetCharPos(buf,len,',');
@@ -210,8 +212,8 @@ void Decode_Sentence()
     }
     
     //Get Speed
-    buf=GPRMCBuffer_AU8;
-    len=GPRMCSize_U8;
+    buf=Buffer_AU8;
+    len=Size_U8;
     for (uint8_t i=0; i<_GPRMC_SPEED_ORDER_; i++)
     {
       pos=GetCharPos(buf,len,',');
@@ -235,8 +237,8 @@ void Decode_Sentence()
     //GetTime
     if (!GetTimeDone_B)
     {
-      buf=GPRMCBuffer_AU8;
-      len=GPRMCSize_U8;
+      buf=Buffer_AU8;
+      len=Size_U8;
       for (uint8_t i=0; i<_GPRMC_TIME_ORDER_; i++)
       {
         pos=GetCharPos(buf,len,',');
@@ -263,31 +265,42 @@ void Decode_Sentence()
       }
     }
   }
+  Size_U8=0;
+  DecodeTime_B=false;
+}
+
+bool CheckBusy()
+{
+  return (DecodeTime_B || SaveTime_B);
 }
 
 void GPS_Receive_Handle(uint8_t ch)
 {
   Buffer_AU8[Size_U8++]=ch;
-  WriteBuffer_AU8[WriteSize_U8++]=ch;
-  if (WriteSize_U8==_SIZE_TO_WRITE_)
-  {
-    WriteBuffer_AU8[WriteSize_U8]=0;
-    memcpy(WriteBufferCPY_AU8, WriteBuffer_AU8, WriteSize_U8+1);
-    WriteSizeCPY_U8=WriteSize_U8;
-    SaveTime_B=true;
-  }
+  WriteBuffer_AU8[WriteSize_U32++]=ch;
+  // Serial.println(WriteSize_U32);
 
   if (ch=='\n')
   {
+    NumberOfSentence_U8++;
+    if (NumberOfSentence_U8==_SENTENCE_TO_WRITE_)
+    {
+      Serial.println(WriteSize_U32);
+      WriteBuffer_AU8[WriteSize_U32]=0;
+      // memcpy(WriteBufferCPY_AU8, WriteBuffer_AU8, WriteSize_U8+1);
+      // WriteSizeCPY_U8=WriteSize_U8;
+      SaveTime_B=true;
+      NumberOfSentence_U8=0;
+    }
+    
     Buffer_AU8[Size_U8]=0;
     if (memcmp(Buffer_AU8,"$GPRMC",6)==0)
     {
-      GPRMCSize_U8 = Size_U8;
-      memcpy(GPRMCBuffer_AU8, Buffer_AU8, GPRMCSize_U8+1);
+      // GPRMCSize_U8 = Size_U8;
+      // memcpy(GPRMCBuffer_AU8, Buffer_AU8, GPRMCSize_U8+1);
       // Decode_Sentence();
       DecodeTime_B=true;
     }
-    Size_U8=0;
   }  
 }
 
@@ -299,10 +312,10 @@ void PPS_INT_Handle()
     return;
   }
 
-  while (!IsWirelessRunning_B)
+
+  while (!IsWirelessRunning_B && !CheckBusy())
   {
     RxData_I32=Serial2.read();
-
     if (RxData_I32!=-1)
     {
       // Serial.print((char)RxData_I32);
@@ -329,17 +342,9 @@ void Button_Right_Handle()
 void CreateBlankFile()
 {
   if (SD.exists(Path))
-  {
     SD.remove(Path);
-    File myfile = SD.open(Path, FILE_WRITE);
-    myfile.close();
-  }
-  else
-  {
-    File myfile = SD.open(Path, FILE_WRITE);
-    myfile.close();
-  }
-
+  File myfile = SD.open(Path, FILE_WRITE);
+  myfile.close();
 }
 
 void Task1code( void * pvParameters )
