@@ -19,7 +19,7 @@
 
 #define _KNOT_2_KMH_              1.852
 
-#define _SPEED_THRESH_HOLD_       40.0
+#define _SPEED_THRESH_HOLD_       30.0//40.0
 #define _SPEED_THRESH_HOLD_DELTA_ 1.0
 
 #define _SENTENCE_TO_WRITE_           10
@@ -83,11 +83,11 @@ void appendFile(fs::FS &fs, const char * path, const char * message){
     if(file.print(message)){
         if (!IsWirelessRunning_B)
         {
-          Serial.println("File appended");
+          // Serial.println("File appended");
           GPIOWrite(_ONBOARD_LED_PIN_,1);
         }
     } else {
-        Serial.println("Append failed");
+        // Serial.println("Append failed");
         if (!IsWirelessRunning_B)
           GPIOWrite(_ONBOARD_LED_PIN_,0);
     }
@@ -230,7 +230,10 @@ void Decode_Sentence()
     if (nextpos!=-1)
     {
       buf[nextpos]=0;
-      speed=atof((char *)buf)*_KNOT_2_KMH_;
+      if (nextpos!=pos+1)
+        speed=atof((char *)buf)*_KNOT_2_KMH_;
+      else
+        speed=0;
       New_Speed_Handle(speed);
     }
 
@@ -278,14 +281,12 @@ void GPS_Receive_Handle(uint8_t ch)
 {
   Buffer_AU8[Size_U8++]=ch;
   WriteBuffer_AU8[WriteSize_U32++]=ch;
-  // Serial.println(WriteSize_U32);
 
-  if (ch=='\n')
+  if (ch==(uint8_t)'\n')
   {
     NumberOfSentence_U8++;
     if (NumberOfSentence_U8==_SENTENCE_TO_WRITE_)
     {
-      Serial.println(WriteSize_U32);
       WriteBuffer_AU8[WriteSize_U32]=0;
       // memcpy(WriteBufferCPY_AU8, WriteBuffer_AU8, WriteSize_U8+1);
       // WriteSizeCPY_U8=WriteSize_U8;
@@ -301,7 +302,13 @@ void GPS_Receive_Handle(uint8_t ch)
       // Decode_Sentence();
       DecodeTime_B=true;
     }
+    else
+    {
+      Size_U8=0;
+    }
+    
   }  
+  // Serial.println(WriteSize_U32);
 }
 
 void PPS_INT_Handle()
@@ -379,10 +386,25 @@ void setup() {
     File entry=root.openNextFile();
     if (!entry)
       break;
-    SD.remove(entry.name());
-    Serial.println(cnt++);
+    Serial.println("A");
+    Serial.println(entry.name());
+    Serial.println(entry.size());
   }
-  Serial.println("Delete Done");*/
+
+  root=SD.open("/datalog_ESP32_251120_025443.00_GMT0.txt");
+  while (1)
+  {
+    int tmp=root.read();
+    if (tmp!=-1)
+      Serial.print((char)tmp);
+    else
+    {
+      break;
+    }
+      
+  }
+  root.close();*/
+  // Serial.println("Delete Done");
   CreateBlankFile();
 
   GPIOInit(_GPS_EN_PIN_,OUTPUT);
