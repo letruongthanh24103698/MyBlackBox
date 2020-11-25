@@ -8,10 +8,14 @@
 #define _WIFI_CONNECTION_STATUS_PIN_    _LED_LEFT_PIN_
 
 void wireless_setup();
+
 void wirelessWIFI_loop();
 void wirelessWIFI_start();
 void wirelessWIFI_stop();
+bool wirelessWIFI_CheckTimeout();
+
 void wirelessBLE_loop();
 void wirelessBLE_start();
 void wirelessBLE_stop();
+bool wirelessBLE_CheckTimeout();
 #endif

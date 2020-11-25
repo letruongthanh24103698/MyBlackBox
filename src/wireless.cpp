@@ -20,12 +20,17 @@
 #include "wireless.h"
 #include "Server.h"
 
+#define _MAX_TIME_CHANGE_LED_STATUS_	30
+
 hw_timer_t * timerWIFI = NULL;
 hw_timer_t * timerBLE = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
 bool ChangeWIFILedStatus_B=false;
 bool ChangeBLELedStatus_B=false;
+
+uint8_t ChangeWIFILedStatus_Cnt_U8=0;
+uint8_t ChangeBLELedStatus_Cnt_U8=0;
 
 /** Build time */
 const char compileDate[] = __DATE__ " " __TIME__;
@@ -89,6 +94,7 @@ class MyServerCallbacks: public BLEServerCallbacks {
 	// TODO this doesn't take into account several clients being connected
 	void onConnect(BLEServer* pServer) {
 		Serial.println("BLE client connected");
+		ChangeBLELedStatus_Cnt_U8=0;
 		timerAlarmDisable(timerBLE);
         GPIOWrite(_BLE_CONNECTION_STATUS_PIN_,1);
 	};
@@ -248,6 +254,7 @@ void deinitBLE()
 /** Callback for receiving IP address from AP */
 void gotIP(system_event_id_t event) {
 	timerAlarmDisable(timerWIFI);
+	ChangeWIFILedStatus_Cnt_U8=0;
     GPIOWrite(_WIFI_CONNECTION_STATUS_PIN_,1);
 	server_start();
 	isConnected = true;
@@ -415,24 +422,28 @@ void wireless_setup()
 void IRAM_ATTR onTimerRight() {
 	portENTER_CRITICAL_ISR(&timerMux);
 	ChangeBLELedStatus_B=true;
+	ChangeBLELedStatus_Cnt_U8++;
 	portEXIT_CRITICAL_ISR(&timerMux);
 }
 
 void IRAM_ATTR onTimerLeft() {
 	portENTER_CRITICAL_ISR(&timerMux);
 	ChangeWIFILedStatus_B=true;
+	ChangeWIFILedStatus_Cnt_U8++;
 	portEXIT_CRITICAL_ISR(&timerMux);
 }
 
 void wirelessWIFI_stop()
 {
     WiFi.mode(WIFI_OFF);
+	timerAlarmDisable(timerWIFI);
     isConnected=false;
 	Serial.println("Wireless WIFI Stopped!");
 }
 
 void wirelessWIFI_start()
 {
+	ChangeWIFILedStatus_Cnt_U8=0;
 	timerAttachInterrupt(timerWIFI, &onTimerLeft, true);
 	timerAlarmWrite(timerWIFI, 500000, true);
 	timerAlarmEnable(timerWIFI);
@@ -466,16 +477,23 @@ void wirelessWIFI_loop()
     connStatusChanged = false;
 }
 
+bool wirelessWIFI_CheckTimeout()
+{
+	return (ChangeWIFILedStatus_Cnt_U8>=_MAX_TIME_CHANGE_LED_STATUS_);
+}
+
 void wirelessBLE_stop()
 {
     BLEDevice::deinit(false);
     btStop();
+	timerAlarmDisable(timerBLE);
 	Serial.println("Wireless BLE Stopped!");
 }
 
 void wirelessBLE_start()
 {
 	initBLE();
+	ChangeBLELedStatus_Cnt_U8=0;
 	timerAttachInterrupt(timerBLE, &onTimerRight, true);
 	timerAlarmWrite(timerBLE, 500000, true);
 	timerAlarmEnable(timerBLE);
@@ -489,4 +507,9 @@ void wirelessBLE_loop()
 		ChangeBLELedStatus_B=false;
 		GPIOToggle(_BLE_CONNECTION_STATUS_PIN_);
 	}
+}
+
+bool wirelessBLE_CheckTimeout()
+{
+	return (ChangeBLELedStatus_Cnt_U8>=_MAX_TIME_CHANGE_LED_STATUS_);
 }

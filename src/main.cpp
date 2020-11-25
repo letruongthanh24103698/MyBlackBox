@@ -499,11 +499,15 @@ void loop() {
   {
     wirelessWIFI_loop();
     server_loop();
+    if (wirelessWIFI_CheckTimeout())
+      ChangeModeWirelessWIFI_B=true;
   }
 
   if (IsWirelessBLERunning_B)
   {
     wirelessBLE_loop();
+    if (wirelessBLE_CheckTimeout())
+      ChangeModeWirelessBLE_B=true;
   }
 
   PPS_INT_Handle();
